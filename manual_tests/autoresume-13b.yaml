@@ -1,0 +1,50 @@
+integrations:
+- integration_type: wandb
+  project: v13-2-resumption-test
+  entity: mosaic-ml
+- integration_type: git_repo
+  git_repo: mosaicml/examples
+  git_branch: main # use your branch
+  # git_commit: # OR use your commit hash
+  pip_install: -e .[llm]
+  ssh_clone: false
+- integration_type: git_repo
+  git_repo: mosaicml/composer
+  git_branch: dev # use your branch
+  pip_install: -e .[all]
+
+# We are fetching, converting, and training on the 'val' split
+# as it is small and quick to get going for this demo.
+# For real training runs, follow the instructions in `examples/llm/README.md`
+# to convert and host the full 'train' dataset.
+command: |
+  cd examples/examples/llm
+  python ../common/convert_c4.py --out_root ./my-copy-c4 --splits train_small val \
+    --concat_tokens 2048 --tokenizer gpt2 --eos_text '<|endoftext|>'
+  composer main.py yamls/mosaic_gpt/13b.yaml \
+    train_loader.dataset.split=train_small \
+    global_train_batch_size=16 \
+    device_train_microbatch_size=1 \
+    fsdp_config.activation_checkpointing=true \
+    fsdp_config.activation_cpu_offload=true \
+    fsdp_config.state_dict_type='full' \
+    run_name='autoresume-test' \
+    loggers='{wandb:{}}' \
+    max_duration=2ba \
+    eval_interval=0 \
+    save_folder='s3://mosaicml-internal-checkpoints-test/evan-test/checkpoints/gpt_13b/monolithic/{run_name}' \
+    save_interval=2ba 
+
+image: mosaicml/pytorch:1.13.1_cu117-python3.10-ubuntu20.04
+optimization_level: 0
+
+# Mosaic Cloud will use run_name (with a unique suffix) to populate the env var $COMPOSER_RUN_NAME
+run_name: 13b-save-monolithic-autoresume-initial
+
+gpu_num: 16
+gpu_type: a100_40gb
+cluster: r7z2 # replace with your cluster here!
+
+# The below is injected as a YAML file: /mnt/config/parameters.yaml
+# but is not used in this example.
+parameters: {}

@@ -1,0 +1,37 @@
+integrations:
+  - integration_type: git_repo
+    git_repo: mosaicml/examples
+    git_commit: 7117377bdfbcb1c03c4937d308c71179057ff961
+  - integration_type: git_repo
+    git_repo: eracah/evan-composer
+    git_branch: fsdp-sd-type
+    pip_install: -e .[all]
+  - integration_type: wandb
+    entity: mosaic-ml
+    project: evan-fsdp-ckpt-test
+
+command: |
+  cd examples/llm
+  python ../scripts/convert_c4.py --out_root ./my-copy-c4 --splits train_small val
+  composer main.py yamls/mosaic_gpt/30b.yaml \
+    train_loader.dataset.split=train_small \
+    global_train_batch_size=32 \
+    device_train_microbatch_size=1 \
+    fsdp_config.activation_checkpointing=true \
+    fsdp_config.activation_cpu_offload=true \
+    fsdp_config.state_dict_type='local' \
+    max_duration=10ba \
+    callbacks.speed_monitor.window_size=1 \
+    eval_interval=0 \
+    load_path='s3://mosaicml-internal-checkpoints-test/evan-test/checkpoints/gpt-30b/sharded-ckpts-s3-save-gpt-30b-XAvOH1/ep0-ba5-rank{rank}.pt' \
+    loggers='{wandb:{}}' \
+    run_name=$COMPOSER_RUN_NAME
+
+image: mosaicml/examples:llm-7117377
+optimization_level: 0
+
+run_name: sharded-ckpts-s3-load-gpt-30b
+
+gpu_num: 32
+cluster: r7z2
+parameters: {}

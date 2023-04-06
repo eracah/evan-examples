@@ -1,0 +1,45 @@
+integrations:
+  - integration_type: git_repo
+    git_repo: mosaicml/examples
+    git_branch: v0.0.3 # use your branch
+    pip_install: -e .[llm]
+    ssh_clone: false
+  - integration_type: git_repo
+    git_repo: mosaicml/composer
+    git_branch: dev
+    pip_install: -e .[all] 
+  - integration_type: wandb
+    entity: mosaic-ml
+    project: evan-fsdp-ckpt-test
+
+
+command: |
+  cd examples/examples/llm
+  python ../common/convert_c4.py --out_root ./my-copy-c4 --splits train_small val \
+    --concat_tokens 2048 --tokenizer gpt2 --eos_text '<|endoftext|>'
+  composer main.py yamls/mosaic_gpt/30b.yaml \
+    train_loader.dataset.split=train_small \
+    global_train_batch_size=64 \
+    device_train_microbatch_size=1 \
+    fsdp_config.activation_checkpointing=true \
+    fsdp_config.activation_cpu_offload=true \
+    fsdp_config.state_dict_type='full' \
+    max_duration=6ba \
+    callbacks.speed_monitor.window_size=1 \
+    eval_interval=0 \
+    load_path='s3://mosaicml-internal-checkpoints-test/evan-test/checkpoints/gpt-30b/monolithic-ckpts-s3-save-gpt-30b-mrmpSD/ep0-ba5-rank0.pt' \
+    save_interval=1ba \
+    loggers='{wandb:{}}' \
+    run_name=$COMPOSER_RUN_NAME
+#  ls './checkpoints'
+#  du -sh './checkpoints'
+
+image: mosaicml/examples:llm-891f629
+optimization_level: 0
+
+run_name: 30b-gpt-load-s3-monolithic
+
+gpu_num: 32
+cluster: r7z2
+
+parameters: {}

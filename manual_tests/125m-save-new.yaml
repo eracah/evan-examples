@@ -1,0 +1,152 @@
+run_name: hero-03-03-v003-125m-save-oci-test
+
+
+gpu_type: a100_40gb
+gpu_num: 16
+platform: r12z1
+image: mosaicml/pytorch:1.13.1_cu117-python3.10-ubuntu20.04
+
+integrations:
+  - integration_type: wandb
+    project: evan-fsdp-ckpt-test
+    entity: mosaic-ml
+  - integration_type: git_repo
+    git_repo: mvpatel2000/examples
+    git_commit: 99bbee2edcb622bade2209d246ce7e0ddbd0f126
+    pip_install: '.[llm]'
+  - integration_type: git_repo
+    git_repo: eracah/evan-composer
+    git_branch: oci-fix
+    pip_install: '.[all]'
+
+command: |
+  cd examples/examples/llm
+  composer main.py /mnt/config/parameters.yaml
+
+parameters:
+  data_local: ./my-copy-c4
+  data_remote: # If blank, files must be present in data_local
+  tokenizer_name: gpt2
+  max_seq_len: 2048
+  global_seed: 17
+
+  # Model
+  model:
+    name: mosaic_gpt
+    init_device: meta
+    tokenizer_name: ${tokenizer_name}
+    d_model: 768
+    n_heads: 12
+    n_layers: 12
+    mlp_ratio: 4
+    max_seq_len: ${max_seq_len}
+    vocab_size: 50257
+    init_std: 0.02
+    attn_pdrop: 0.0
+    resid_pdrop: 0.0
+    emb_pdrop: 0.0
+    attn_impl: flash
+
+  # Tokenizer
+  tokenizer:
+    type: hftokenizer
+    args:
+      tokenizer_name: ${tokenizer_name}
+      max_seq_len: ${max_seq_len}
+
+  # Dataloaders
+  train_loader:
+    name: text
+    dataset:
+      local: ${data_local}
+      remote: ${data_remote}
+      split: train
+      shuffle: true
+      tokenizer_name: ${tokenizer_name}
+      max_seq_len: ${max_seq_len}
+      shuffle_seed: ${global_seed}
+    drop_last: true
+    num_workers: 8
+
+  eval_loader:
+    name: text
+    dataset:
+      local: ${data_local}
+      remote: ${data_remote}
+      split: val
+      shuffle: false
+      tokenizer_name: ${tokenizer_name}
+      max_seq_len: ${max_seq_len}
+      shuffle_seed: ${global_seed}
+    drop_last: false
+    num_workers: 8
+
+  # Optimization
+  scheduler:
+    name: cosine_with_warmup
+    t_warmup: 100ba
+    alpha_f: 0.1
+
+  optimizer:
+    name: decoupled_adamw
+    lr: 6.0e-4
+    betas:
+    - 0.9
+    - 0.95
+    eps: 1.0e-08
+    weight_decay: 0.0
+
+  algorithms:
+    gradient_clipping:
+      clipping_type: norm
+      clipping_threshold: 1.0
+
+  max_duration: 4800ba # ~ 2.5B tokens
+  eval_interval: 500ba
+  eval_subset_num_batches: -1
+  global_train_batch_size: 256
+
+  # System
+  seed: ${global_seed}
+  device_eval_batch_size: 16
+  device_train_microbatch_size: 16
+  # device_train_microbatch_size: auto
+  precision: amp_bf16
+
+  # FSDP
+  fsdp_config:
+    sharding_strategy: FULL_SHARD
+    mixed_precision: DEFAULT
+    activation_checkpointing: false
+    activation_cpu_offload: false
+    verbose: false
+
+  # Logging
+  progress_bar: false
+  log_to_console: true
+  console_log_interval: 1ba
+
+  callbacks:
+    speed_monitor:
+      window_size: 10
+    lr_monitor: {}
+    memory_monitor: {}
+
+  save_num_checkpoints_to_keep: 1
+  save_folder: oci://mosaicml-internal-checkpoints/nlp-bakeoff/v003-03-02-1b-base/checkpoints
+  save_interval: 1ba 
+  autoresume: false
+
+  icl_tasks:
+  -
+    label: lambada_openai
+    dataset_uri: s3://mosaicml-internal-dataset-lambda/lambada/lambada_openai.jsonl # ADD YOUR OWN DATASET URI
+    num_fewshot:
+    - 0
+    batch_size: 4
+    icl_task_type: language_modeling
+    metric_names:
+    - InContextLearningLMAccuracy
+    prompt_string: '' # this goes at the beginning of each input
+    example_delimiter: '\n' # this goes between fewshot examples
+    continuation_delimiter: ' ' # this separates contexts from continuations
